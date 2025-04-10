@@ -2,42 +2,91 @@
 #include <stdlib.h>
 #include <string.h>
 
-void parse_word_as_op(const char *word, int *stack, int *sp) {
-    if (strcmp(word, "+") == 0) {
+#define MAX_TOKENS 100
+#define MAX_LINE_LENGTH 512
+
+// Find the column of the current token in a line
+int find_col(const char *line, const char *word) {
+    const char *ptr = strstr(line, word);
+    if (ptr) {
+        return ptr - line + 1; // 1-based column
+    }
+    return -1; // Word not found
+}
+
+// Tokenize a line into words (space-separated)
+int lex_line(const char *line, char tokens[MAX_TOKENS][MAX_LINE_LENGTH]) {
+    int token_count = 0;
+    char *line_copy = strdup(line);
+    char *token = strtok(line_copy, " \t\n");
+
+    while (token != NULL && token_count < MAX_TOKENS) {
+        strncpy(tokens[token_count], token, MAX_LINE_LENGTH);
+        token_count++;
+        token = strtok(NULL, " \t\n");
+    }
+
+    free(line_copy);
+    return token_count;
+}
+
+// Lex the file, returning the tokenized words line by line
+int lex_file(const char *filename, char tokens[MAX_TOKENS][MAX_LINE_LENGTH]) {
+    FILE *file = fopen(filename, "r");
+    if (!file) {
+        perror("Failed to open file");
+        return -1;
+    }
+
+    int token_count = 0;
+    char line[MAX_LINE_LENGTH];
+    while (fgets(line, sizeof(line), file)) {
+        int num_tokens = lex_line(line, &tokens[token_count]);
+        token_count += num_tokens;
+    }
+
+    fclose(file);
+    return token_count;
+}
+
+// Tokenize and execute the operation for each word/token
+void parse_token_as_op(const char *token, int *stack, int *sp) {
+    if (strcmp(token, "+") == 0) {
         if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
         stack[*sp - 2] = stack[*sp - 2] + stack[*sp - 1];
         (*sp)--;
-    } else if (strcmp(word, "-") == 0) {
+    } else if (strcmp(token, "-") == 0) {
         if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
         stack[*sp - 2] = stack[*sp - 2] - stack[*sp - 1];
         (*sp)--;
-    } else if (strcmp(word, "*") == 0) {
+    } else if (strcmp(token, "*") == 0) {
         if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
         stack[*sp - 2] = stack[*sp - 2] * stack[*sp - 1];
         (*sp)--;
-    } else if (strcmp(word, "/") == 0) {
+    } else if (strcmp(token, "/") == 0) {
         if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
         if (stack[*sp - 1] == 0) { fprintf(stderr, "Division by zero\n"); exit(1); }
         stack[*sp - 2] = stack[*sp - 2] / stack[*sp - 1];
         (*sp)--;
-    } else if (strcmp(word, ".") == 0) {
+    } else if (strcmp(token, ".") == 0) {
         if (*sp < 1) { fprintf(stderr, "Stack underflow\n"); exit(1); }
         printf("%d\n", stack[--(*sp)]);
-    } else if (strcmp(word, "dup") == 0) {
+    } else if (strcmp(token, "dup") == 0) {
         if (*sp < 1) { fprintf(stderr, "Stack underflow\n"); exit(1); }
         stack[*sp] = stack[*sp - 1];
         (*sp)++;
-    } else if (strcmp(word, "swap") == 0) {
+    } else if (strcmp(token, "swap") == 0) {
         if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
         int temp = stack[*sp - 1];
         stack[*sp - 1] = stack[*sp - 2];
         stack[*sp - 2] = temp;
     } else {
         // Treat as a number and push to stack
-        stack[(*sp)++] = atoi(word);
+        stack[(*sp)++] = atoi(token);
     }
 }
 
+// Load the program from a file and execute it
 void load_program_from_file(const char *filename, int *stack, int *sp) {
     FILE *f = fopen(filename, "r");
     if (!f) {
@@ -45,14 +94,15 @@ void load_program_from_file(const char *filename, int *stack, int *sp) {
         return;
     }
 
-    char word[32];
-    while (fscanf(f, "%31s", word) == 1) {
-        parse_word_as_op(word, stack, sp);
+    char token[32];
+    while (fscanf(f, "%31s", token) == 1) {
+        parse_token_as_op(token, stack, sp);
     }
 
     fclose(f);
 }
 
+// Simulate the program
 void simulate_program(const char *filename) {
     int stack[1024];
     int sp = 0;
@@ -60,6 +110,7 @@ void simulate_program(const char *filename) {
     load_program_from_file(filename, stack, &sp);
 }
 
+// Compile the program into an executable
 void compile_program(const char *filename) {
     FILE *f = fopen(filename, "r");
     if (!f) {
@@ -153,19 +204,20 @@ int main(int argc, char *argv[]) {
     }
 
     const char *mode = argv[1];
-    const char *file = argv[2];
+    const char *filename = argv[2];
 
     if (strcmp(mode, "sim") == 0) {
-        simulate_program(file);
+        simulate_program(filename);
     } else if (strcmp(mode, "com") == 0) {
-        compile_program(file);
+        compile_program(filename);
     } else {
-        fprintf(stderr, "Unknown mode: %s\n", mode);
+        fprintf(stderr, "Invalid mode. Use 'sim' or 'com'.\n");
         return 1;
     }
 
     return 0;
 }
+
 
 
 

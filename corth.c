@@ -80,6 +80,22 @@ void parse_token_as_op(const char *token, int *stack, int *sp) {
         int temp = stack[*sp - 1];
         stack[*sp - 1] = stack[*sp - 2];
         stack[*sp - 2] = temp;
+    } if (strcmp(token, "=") == 0) {
+        if (sp < 2) {
+            printf("Not enough values on stack for equality check\n");
+            return;
+        }
+
+        // Get the two topmost values
+        int b = pop();
+        int a = pop();
+
+        // Compare and push result (1 if equal, 0 if not)
+        if (a == b) {
+            push(1);  // Equal
+        } else {
+            push(0);  // Not equal
+        }
     } else {
         // Treat as a number and push to stack
         stack[(*sp)++] = atoi(token);

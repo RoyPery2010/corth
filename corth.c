@@ -1,238 +1,375 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <assert.h>
 
-#define MAX_TOKENS 100
-#define MAX_LINE_LENGTH 512
+#define MAX_STACK_SIZE 1024
+#define MAX_PROGRAM_SIZE 2048
 
-// Find the column of the current token in a line
-int find_col(const char *line, const char *word) {
-    const char *ptr = strstr(line, word);
-    if (ptr) {
-        return ptr - line + 1; // 1-based column
+// Operation constants
+#define OP_PUSH    1
+#define OP_PLUS    2
+#define OP_MINUS   3
+#define OP_MUL     4
+#define OP_DIV     5
+#define OP_EQUAL   6
+#define OP_DUP     7
+#define OP_SWAP    8
+#define OP_IF      9
+#define OP_END     10
+#define OP_DUMP    11
+#define OP_ELSE 12
+
+
+// Stack for operations
+int stack[MAX_STACK_SIZE];
+int sp = 0;  // Stack pointer
+
+// Stack to track conditional blocks (iff and end)
+int conditional_stack[MAX_STACK_SIZE];
+int conditional_sp = 0;  // Stack pointer for conditional block tracking
+
+// Lexing state
+char token[32];
+
+// Conditional block state tracking
+int skip_block = 0;  // Flag to skip the block if condition is false
+
+// Operation counter
+int COUNT_OPS = 0;  // Counter for operations
+
+// Program token list (this simulates the list of operations in the program)
+int program[MAX_PROGRAM_SIZE];
+int program_size = 0;
+
+// Push value onto the stack
+void push(int value) {
+    if (sp < MAX_STACK_SIZE) {
+        stack[sp++] = value;
+        COUNT_OPS++;  // Increment the operation counter
+    } else {
+        printf("Stack overflow!\n");
     }
-    return -1; // Word not found
 }
 
-// Tokenize a line into words (space-separated)
-int lex_line(const char *line, char tokens[MAX_TOKENS][MAX_LINE_LENGTH]) {
-    int token_count = 0;
-    char *line_copy = strdup(line);
-    char *token = strtok(line_copy, " \t\n");
-
-    while (token != NULL && token_count < MAX_TOKENS) {
-        strncpy(tokens[token_count], token, MAX_LINE_LENGTH);
-        token_count++;
-        token = strtok(NULL, " \t\n");
-    }
-
-    free(line_copy);
-    return token_count;
-}
-
-// Lex the file, returning the tokenized words line by line
-int lex_file(const char *filename, char tokens[MAX_TOKENS][MAX_LINE_LENGTH]) {
-    FILE *file = fopen(filename, "r");
-    if (!file) {
-        perror("Failed to open file");
+// Pop value from the stack
+int pop() {
+    if (sp > 0) {
+        COUNT_OPS++;  // Increment the operation counter
+        return stack[--sp];
+    } else {
+        printf("Stack underflow!\n");
         return -1;
     }
-
-    int token_count = 0;
-    char line[MAX_LINE_LENGTH];
-    while (fgets(line, sizeof(line), file)) {
-        int num_tokens = lex_line(line, &tokens[token_count]);
-        token_count += num_tokens;
-    }
-
-    fclose(file);
-    return token_count;
 }
 
-// Tokenize and execute the operation for each word/token
-void parse_token_as_op(const char *token, int *stack, int *sp) {
-    if (strcmp(token, "+") == 0) {
-        if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
-        stack[*sp - 2] = stack[*sp - 2] + stack[*sp - 1];
-        (*sp)--;
-    } else if (strcmp(token, "-") == 0) {
-        if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
-        stack[*sp - 2] = stack[*sp - 2] - stack[*sp - 1];
-        (*sp)--;
-    } else if (strcmp(token, "*") == 0) {
-        if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
-        stack[*sp - 2] = stack[*sp - 2] * stack[*sp - 1];
-        (*sp)--;
-    } else if (strcmp(token, "/") == 0) {
-        if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
-        if (stack[*sp - 1] == 0) { fprintf(stderr, "Division by zero\n"); exit(1); }
-        stack[*sp - 2] = stack[*sp - 2] / stack[*sp - 1];
-        (*sp)--;
-    } else if (strcmp(token, ".") == 0) {
-        if (*sp < 1) { fprintf(stderr, "Stack underflow\n"); exit(1); }
-        printf("%d\n", stack[--(*sp)]);
-    } else if (strcmp(token, "dup") == 0) {
-        if (*sp < 1) { fprintf(stderr, "Stack underflow\n"); exit(1); }
-        stack[*sp] = stack[*sp - 1];
-        (*sp)++;
-    } else if (strcmp(token, "swap") == 0) {
-        if (*sp < 2) { fprintf(stderr, "Stack underflow\n"); exit(1); }
-        int temp = stack[*sp - 1];
-        stack[*sp - 1] = stack[*sp - 2];
-        stack[*sp - 2] = temp;
-    } if (strcmp(token, "=") == 0) {
-        if (sp < 2) {
-            printf("Not enough values on stack for equality check\n");
-            return;
-        }
+// Print the top value of the stack
+void dump() {
+    if (sp > 0) {
+        printf("%d\n", stack[sp - 1]);
+        COUNT_OPS++;  // Increment the operation counter
+    } else {
+        printf("Stack is empty!\n");
+    }
+}
 
-        // Get the two topmost values
+// Duplicate the top value of the stack
+void dup() {
+    if (sp > 0) {
+        push(stack[sp - 1]);
+        COUNT_OPS++;  // Increment the operation counter
+    } else {
+        printf("Stack is empty!\n");
+    }
+}
+
+// Swap the top two values on the stack
+void swap() {
+    if (sp > 1) {
+        int temp = stack[sp - 1];
+        stack[sp - 1] = stack[sp - 2];
+        stack[sp - 2] = temp;
+        COUNT_OPS++;  // Increment the operation counter
+    } else {
+        printf("Not enough elements to swap!\n");
+    }
+}
+
+// Add top two values
+void plus() {
+    if (sp > 1) {
         int b = pop();
         int a = pop();
+        push(a + b);
+    } else {
+        printf("Not enough elements to add!\n");
+    }
+    COUNT_OPS++;  // Increment the operation counter
+}
 
-        // Compare and push result (1 if equal, 0 if not)
+// Subtract top two values
+void minus() {
+    if (sp > 1) {
+        int b = pop();
+        int a = pop();
+        push(a - b);
+    } else {
+        printf("Not enough elements to subtract!\n");
+    }
+    COUNT_OPS++;  // Increment the operation counter
+}
+
+// Multiply top two values
+void mul() {
+    if (sp > 1) {
+        int b = pop();
+        int a = pop();
+        push(a * b);
+    } else {
+        printf("Not enough elements to multiply!\n");
+    }
+    COUNT_OPS++;  // Increment the operation counter
+}
+
+// Divide top two values
+void div() {
+    if (sp > 1) {
+        int b = pop();
+        if (b == 0) {
+            printf("Error: Division by zero!\n");
+            push(0);  // Optional: Push 0 on error or handle the error appropriately.
+        } else {
+            int a = pop();
+            push(a / b);
+        }
+    } else {
+        printf("Not enough elements to divide!\n");
+    }
+    COUNT_OPS++;  // Increment the operation counter
+}
+
+// Equal check for top two values
+void equal() {
+    if (sp > 1) {
+        int b = pop();
+        int a = pop();
         if (a == b) {
-            push(1);  // Equal
+            push(1);  // Push 1 if equal
         } else {
-            push(0);  // Not equal
+            push(0);  // Push 0 if not equal
         }
     } else {
-        // Treat as a number and push to stack
-        stack[(*sp)++] = atoi(token);
+        printf("Not enough elements to compare!\n");
     }
+    COUNT_OPS++;  // Increment the operation counter
 }
 
-// Load the program from a file and execute it
-void load_program_from_file(const char *filename, int *stack, int *sp) {
-    FILE *f = fopen(filename, "r");
-    if (!f) {
-        perror("Failed to open file");
-        return;
-    }
-
-    char token[32];
-    while (fscanf(f, "%31s", token) == 1) {
-        parse_token_as_op(token, stack, sp);
-    }
-
-    fclose(f);
-}
-
-// Simulate the program
-void simulate_program(const char *filename) {
-    int stack[1024];
-    int sp = 0;
-
-    load_program_from_file(filename, stack, &sp);
-}
-
-// Compile the program into an executable
-void compile_program(const char *filename) {
-    FILE *f = fopen(filename, "r");
-    if (!f) {
-        perror("Failed to open file");
-        return;
-    }
-
-    char c_filename[300], o_filename[300], exe_filename[300];
-    snprintf(c_filename, sizeof(c_filename), "%s.c", filename);
-    snprintf(o_filename, sizeof(o_filename), "%s.o", filename);
-    snprintf(exe_filename, sizeof(exe_filename), "%s.out", filename);
-
-    FILE *out = fopen(c_filename, "w");
-    if (!out) {
-        perror("Failed to write C file");
-        fclose(f);
-        return;
-    }
-
-    fprintf(out,
-        "#include <stdio.h>\n"
-        "int main() {\n"
-        "    int stack[1024];\n"
-        "    int sp = 0;\n"
-    );
-
-    char token[32];
-    while (fscanf(f, "%31s", token) == 1) {
-        if (strcmp(token, "+") == 0) {
-            fprintf(out, "    stack[sp - 2] = stack[sp - 2] + stack[sp - 1]; sp--;\n");
-        } else if (strcmp(token, "-") == 0) {
-            fprintf(out, "    stack[sp - 2] = stack[sp - 2] - stack[sp - 1]; sp--;\n");
-        } else if (strcmp(token, "*") == 0) {
-            fprintf(out, "    stack[sp - 2] = stack[sp - 2] * stack[sp - 1]; sp--;\n");
-        } else if (strcmp(token, "/") == 0) {
-            fprintf(out, "    if (stack[sp - 1] == 0) { printf(\"Division by zero\\n\"); return 1; }\n");
-            fprintf(out, "    stack[sp - 2] = stack[sp - 2] / stack[sp - 1]; sp--;\n");
-        } else if (strcmp(token, ".") == 0) {
-            fprintf(out, "    printf(\"%%d\\n\", stack[--sp]);\n");
-        } else if (strcmp(token, "dup") == 0) {
-            fprintf(out, "    stack[sp] = stack[sp - 1]; sp++;\n");
-        } else if (strcmp(token, "swap") == 0) {
-            fprintf(out, "    int temp = stack[sp - 1];\n");
-            fprintf(out, "    stack[sp - 1] = stack[sp - 2];\n");
-            fprintf(out, "    stack[sp - 2] = temp;\n");
+// Conditional (iff) - If top of stack is 0, skip next operations
+void iff() {
+    if (sp > 0) {
+        int condition = pop();
+        if (condition == 0) {
+            skip_block = 1;  // Skip the next block of operations
         } else {
-            fprintf(out, "    stack[sp++] = %d;\n", atoi(token));
+            skip_block = 0;
+        }
+    } else {
+        printf("Not enough elements to evaluate condition!\n");
+    }
+    COUNT_OPS++;  // Increment the operation counter
+}
+
+// End conditional (end) - Ends a conditional block
+void end() {
+    skip_block = 0;  // Reset skip block flag
+    COUNT_OPS++;  // Increment the operation counter
+}
+
+void elze(size_t* ip, int* program, size_t program_size) {
+    size_t i = *ip;
+    int depth = 1;
+    for (; i < program_size; ++i) {
+        if (program[i] == OP_IF) depth++;
+        else if (program[i] == OP_END) {
+            depth--;
+            if (depth == 0) {
+                *ip = i; // Skip to END after ELSE
+                return;
+            }
         }
     }
+    fprintf(stderr, "Unmatched else\n");
+    exit(1);
+}
 
-    fprintf(out, "    return 0;\n}\n");
 
-    fclose(f);
-    fclose(out);
-
-    char cmd[512];
-
-    if (snprintf(cmd, sizeof(cmd), "cc -c %s -o %s", c_filename, o_filename) >= (int)sizeof(cmd)) {
-        fprintf(stderr, "Command too long\n");
-        return;
+// Cross-reference conditional blocks (Check matching iff and end)
+void crossreference_blocks() {
+    if (conditional_sp > 0) {
+        printf("Error: Unmatched 'iff' without 'end'.\n");
+        exit(1);
     }
-    if (system(cmd) != 0) {
-        fprintf(stderr, "Compilation failed (object)\n");
-        return;
-    }
+    printf("All conditional blocks are matched.\n");
+    COUNT_OPS++;  // Increment the operation counter
+}
 
-    if (snprintf(cmd, sizeof(cmd), "cc %s -o %s", o_filename, exe_filename) >= (int)sizeof(cmd)) {
-        fprintf(stderr, "Command too long\n");
-        return;
-    }
-    if (system(cmd) != 0) {
-        fprintf(stderr, "Compilation failed (executable)\n");
-        return;
+// Parse the token as an operation
+void parse_token_as_op(char *token) {
+    static_assert(COUNT_OPS == 13, "Exhaustive handling of op in parse_token_as_op()");
+    if (skip_block) {
+        return;  // Skip the operation if we are in a conditional block
     }
 
-    printf("Compiled to %s\n", exe_filename);
-
-    // Clean up intermediate files
-    if (remove(c_filename) != 0) {
-        fprintf(stderr, "Error removing C file: %s\n", c_filename);
-    }
-    if (remove(o_filename) != 0) {
-        fprintf(stderr, "Error removing object file: %s\n", o_filename);
+    // Match the token to an operation
+    if (strcmp(token, "+") == 0) {
+        plus();
+    } else if (strcmp(token, "-") == 0) {
+        minus();
+    } else if (strcmp(token, "*") == 0) {
+        mul();
+    } else if (strcmp(token, "/") == 0) {
+        div();
+    } else if (strcmp(token, "=") == 0) {
+        equal();
+    } else if (strcmp(token, ".") == 0) {
+        dump();
+    } else if (strcmp(token, "dup") == 0) {
+        dup();
+    } else if (strcmp(token, "swap") == 0) {
+        swap();
+    } else if (strcmp(token, "if") == 0) {
+        iff();
+    } else if (strcmp(token, "end") == 0) {
+        end();
+    } else if (strcmp(token, "else") == 0) {
+        elze(&ip, program, program_size);
     }
 }
 
-int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s [sim|com] file.corth\n", argv[0]);
-        return 1;
+// Lex a line of the program
+void lex_line(char *line) {
+    int i = 0;
+    while (line[i] != '\0') {
+        // Skip spaces and tabs
+        while (line[i] == ' ' || line[i] == '\t') {
+            i++;
+        }
+        
+        // Read the next token
+        int token_start = i;
+        while (line[i] != '\0' && line[i] != ' ' && line[i] != '\t') {
+            i++;
+        }
+        
+        int token_len = i - token_start;
+        if (token_len > 0) {
+            strncpy(token, &line[token_start], token_len);
+            token[token_len] = '\0';
+            
+            // Handle the token (you can simulate or compile here)
+            parse_token_as_op(token);
+        }
     }
+}
 
-    const char *mode = argv[1];
-    const char *filename = argv[2];
-
-    if (strcmp(mode, "sim") == 0) {
-        simulate_program(filename);
-    } else if (strcmp(mode, "com") == 0) {
-        compile_program(filename);
-    } else {
-        fprintf(stderr, "Invalid mode. Use 'sim' or 'com'.\n");
-        return 1;
+// Lex the entire program file
+void lex_file(const char *file_path) {
+    FILE *file = fopen(file_path, "r");
+    if (!file) {
+        printf("Error: Could not open file %s\n", file_path);
+        return;
     }
+    
+    char line[256];
+    int line_number = 1;
+    
+    while (fgets(line, sizeof(line), file)) {
+        printf("Line %d: %s", line_number, line);
+        lex_line(line);
+        line_number++;
+    }
+    
+    fclose(file);
+    
+    // After lexing, cross-reference conditional blocks to ensure matching iff/end pairs
+    crossreference_blocks();
+}
 
+// Simulate the program (without actual compilation)
+void simulate_program(const char *file_path) {
+    printf("Simulating program from file: %s\n", file_path);
+    lex_file(file_path);
+    
+    // Iterate over the program operations
+    for (int i = 0; i < program_size; i++) {
+        int op = program[i];
+        switch (op) {
+            case OP_PUSH:
+                push(42);  // Example: Push value 42 for demonstration
+                break;
+            case OP_PLUS:
+                plus();
+                break;
+            case OP_MINUS:
+                minus();
+                break;
+            case OP_MUL:
+                mul();
+                break;
+            case OP_DIV:
+                div();
+                break;
+            case OP_EQUAL:
+                equal();
+                break;
+            case OP_DUP:
+                dup();
+                break;
+            case OP_SWAP:
+                swap();
+                break;
+            case OP_IF:
+                iff();
+                break;
+            case OP_END:
+                end();
+                break;
+            case OP_DUMP:
+                dump();
+                break;
+            case OP_ELSE:
+                elze(&ip, program, program_size);
+                break;
+            default:
+                printf("Unknown operation: %d\n", op);
+        }
+    }
+    
+    printf("Program simulation complete.\n");
+}
+
+// Compile the program into a C file (here we're just printing the operations)
+void compile_program(const char *file_path) {
+    FILE *file = fopen(file_path, "r");
+    if (!file) {
+        printf("Error: Could not open file %s\n", file_path);
+        return;
+    }
+    
+    printf("Compiling program from file: %s\n", file_path);
+    // In a real scenario, we would generate C code or machine code here
+    fclose(file);
+}
+
+int main() {
+    simulate_program("examples/foo.corth");  // Example file path for testing
     return 0;
 }
+
+
+
+
 
 
 

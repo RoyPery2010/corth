@@ -1,9 +1,5 @@
-34 35 + 70 = if
-    1 if
-        23 .
-    else
-        42 .
-    end
-else
-    420 .
+10
+while dup > do
+    dup .
+    1 .
 end

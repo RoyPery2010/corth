@@ -20,6 +20,9 @@
 #define OP_END     10
 #define OP_DUMP    11
 #define OP_ELSE 12
+#define OP_GT 13
+#define COUNT_OPS 14
+
 
 
 // Stack for operations
@@ -203,6 +206,13 @@ void elze(size_t* ip, int* program, size_t program_size) {
     exit(1);
 }
 
+void gt(int* stack, int* sp) {
+    int b = stack[--(*sp)];
+    int a = stack[--(*sp)];
+    stack[(*sp)++] = (a > b) ? 1 : 0;
+}
+
+
 
 // Cross-reference conditional blocks (Check matching iff and end)
 void crossreference_blocks() {
@@ -216,7 +226,7 @@ void crossreference_blocks() {
 
 // Parse the token as an operation
 void parse_token_as_op(char *token) {
-    static_assert(COUNT_OPS == 13, "Exhaustive handling of op in parse_token_as_op()");
+    static_assert(COUNT_OPS == 14, "Exhaustive handling of op in parse_token_as_op()");
     if (skip_block) {
         return;  // Skip the operation if we are in a conditional block
     }
@@ -244,6 +254,8 @@ void parse_token_as_op(char *token) {
         end();
     } else if (strcmp(token, "else") == 0) {
         elze(&ip, program, program_size);
+    } else if (strcmp(token, "gt") == 0) {
+        gt(stack, &sp);
     }
 }
 
@@ -298,6 +310,7 @@ void lex_file(const char *file_path) {
 
 // Simulate the program (without actual compilation)
 void simulate_program(const char *file_path) {
+    static_assert(COUNT_OPS == 14, "Exhaustive handling of op in simulate_program()");
     printf("Simulating program from file: %s\n", file_path);
     lex_file(file_path);
     
@@ -341,6 +354,10 @@ void simulate_program(const char *file_path) {
             case OP_ELSE:
                 elze(&ip, program, program_size);
                 break;
+            case OP_GT:
+                gt(stack, &sp);
+                break;
+            
             default:
                 printf("Unknown operation: %d\n", op);
         }
